@@ -2,6 +2,8 @@ import streamlit as st
 from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
 import os
+import re
+import html
 from collector import (
     KEYWORD_GROUPS, parse_yonhap, parse_newsis, parse_naver_exclusive
 )
@@ -36,6 +38,18 @@ if "naver_articles" not in st.session_state:
     st.session_state.naver_articles = []
 if "gemini_summary" not in st.session_state:
     st.session_state.gemini_summary = ""
+
+def format_highlighted_content(content_text: str, keywords: list) -> str:
+    """본문에 줄바꿈을 넣고 키워드를 노란색으로 하이라이트"""
+    safe_text = html.escape(content_text)
+    for kw in keywords:
+        if kw:
+            safe_text = re.sub(
+                f"({re.escape(kw)})",
+                r'<mark style="background-color: #fffb91; font-weight: bold;">\1</mark>',
+                safe_text
+            )
+    return safe_text.replace("\n", "<br><br>")
 
 st.subheader("⏱️ 수집 시간대 선택")
 col_b1, col_b2, col_b3, col_b4 = st.columns(4)
@@ -103,29 +117,37 @@ if st.button("🚀 기사 수집 시작", type="primary", use_container_width=Tr
     st.session_state.gemini_summary = ""
     st.success(f"✅ 수집 완료: 통신기사 {len(wire)}건 (연합 {len(yonhap)}건 / 뉴시스 {len(newsis)}건) | 단독기사 {len(naver)}건")
 
-# === 기사 리스트 (전문 전체 표시 & 링크 추가) ===
+# === 기사 리스트 (줄바꿈, 일치키워드, 하이라이트 적용) ===
 col_w, col_n = st.columns(2)
 selected_wires, selected_navers = [], []
 
 with col_w:
     st.subheader(f"◆ 통신기사 ({len(st.session_state.wire_articles)}건)")
     for idx, art in enumerate(st.session_state.wire_articles):
+        matched = art.get('matched_kw', [])
         with st.expander(f"{art['source']} | {art['title']}"):
             checked = st.checkbox("이 기사 선택", key=f"w_chk_{idx}")
             st.markdown(f"[🔗 원문 링크]({art['url']})")
-            st.caption(f"{art['datetime'].strftime('%Y-%m-%d %H:%M')}")
-            st.write(art['content'])  # 전문 전체 출력
+            st.caption(f"{art['datetime'].strftime('%Y-%m-%d %H:%M')} | **일치 키워드:** {', '.join(matched) if matched else '없음'}")
+            
+            highlighted = format_highlighted_content(art['content'], matched)
+            st.markdown(f'<div style="line-height: 1.8;">{highlighted}</div>', unsafe_allow_html=True)
+            
             if checked:
                 selected_wires.append(art)
 
 with col_n:
     st.subheader(f"◆ 단독기사 ({len(st.session_state.naver_articles)}건)")
     for idx, art in enumerate(st.session_state.naver_articles):
+        matched = art.get('matched_kw', [])
         with st.expander(f"[{art['매체']}] {art['title']}"):
             checked = st.checkbox("이 기사 선택", key=f"n_chk_{idx}")
             st.markdown(f"[🔗 원문 링크]({art['url']})")
-            st.caption(f"{art['datetime'].strftime('%Y-%m-%d %H:%M')} | 일치: {', '.join(art['matched_kw'])}")
-            st.write(art['content'])  # 전문 전체 출력
+            st.caption(f"{art['datetime'].strftime('%Y-%m-%d %H:%M')} | **일치 키워드:** {', '.join(matched) if matched else '없음'}")
+            
+            highlighted = format_highlighted_content(art['content'], matched)
+            st.markdown(f'<div style="line-height: 1.8;">{highlighted}</div>', unsafe_allow_html=True)
+            
             if checked:
                 selected_navers.append(art)
 
@@ -181,8 +203,11 @@ with col_t2:
             st.warning("요약할 기사를 먼저 체크박스로 선택해주세요.")
         else:
             with st.spinner("Gemini가 GEM 지침에 맞춰 정제 요약 중입니다..."):
-                summary_result = summarize_with_gemini(raw_report_text, api_key_input)
-                st.session_state.gemini_summary = summary_result
+                try:
+                    summary_result = summarize_with_gemini(raw_report_text, api_key_input)
+                    st.session_state.gemini_summary = summary_result
+                except Exception as e:
+                    st.error(f"요약 중 오류가 발생했습니다: {e}")
                 
     if st.session_state.gemini_summary:
         st.code(st.session_state.gemini_summary, language="markdown")
