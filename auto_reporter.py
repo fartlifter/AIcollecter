@@ -46,17 +46,20 @@ def run_auto_report(slot: str):
         send_telegram_message(f"<{slot_name}보고>법조\n해당 시간대({start_dt.strftime('%H:%M')}~{end_dt.strftime('%H:%M')}) 수집된 기사가 없습니다.")
         return
 
-    raw_text = f"<{slot_name}보고>법조\n"
+    lines = [f"<{slot_name}보고>법조"]
     if wire:
-        raw_text += f"{section_wire}\n"
+        lines.append(section_wire)
         for w in wire:
-            raw_text += f"{wire_prefix}{w['title']}\n-{w['content'].strip()}\n\n"
+            lines.append(f"{wire_prefix}{w['title']}")
+            lines.append(f"-{w['content'].strip()}")
     if naver:
-        raw_text += "【타지】\n"
+        lines.append("【타지】")
         for n in naver:
-            raw_text += f"△{n['매체']}/{n['title']}\n-{n['content'].strip()}\n\n"
+            lines.append(f"△{n['매체']}/{n['title']}")
+            lines.append(f"-{n['content'].strip()}")
             
-    summarized_report = summarize_with_gemini(raw_text.strip(), GEMINI_API_KEY)
+    raw_text = "\n".join(lines).strip()
+    summarized_report = summarize_with_gemini(raw_text, GEMINI_API_KEY)
     send_telegram_message(summarized_report)
 
 if __name__ == "__main__":
