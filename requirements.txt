@@ -1,0 +1,5 @@
+streamlit
+requests
+httpx
+beautifulsoup4
+google-genai
