@@ -1,16 +1,16 @@
-name: 30-Min Pre-Deadline Telegram Reporter
+name: Legal Report Auto Scheduler
 
 on:
   schedule:
-    - cron: '30 23 * * *'  # 08:30 KST (23:30 UTC 전일) - 오전 보고
+    - cron: '30 23 * * *'  # 08:30 KST (23:30 UTC) - 오전 보고
     - cron: '30 2 * * *'   # 11:30 KST (02:30 UTC) - 오후 보고
     - cron: '30 7 * * *'   # 16:30 KST (07:30 UTC) - 저녁 보고
   workflow_dispatch:
     inputs:
       slot:
-        description: '실행할 보고 슬롯 (morning / afternoon / evening)'
+        description: '실행 슬롯 (morning / afternoon / evening)'
         required: true
-        default: 'morning'
+        default: 'evening'
 
 jobs:
   auto-report:
@@ -21,10 +21,10 @@ jobs:
         with:
           python-version: '3.11'
           
-      - name: 의존성 패키지 설치
-        run: pip install -r requirements.txt
+      - name: 패키지 설치
+        run: pip install requests httpx beautifulsoup4 google-genai
 
-      - name: 수집 및 텔레그램 발송
+      - name: 기사 수집 및 요약 텔레그램 발송
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -32,11 +32,4 @@ jobs:
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          SLOT="${{ github.event.inputs.slot }}"
-          if [ -z "$SLOT" ]; then
-            HOUR=$(date -u +%H)
-            if [ "$HOUR" -eq 23 ]; then SLOT="morning"; fi
-            if [ "$HOUR" -eq 2 ]; then SLOT="afternoon"; fi
-            if [ "$HOUR" -eq 7 ]; then SLOT="evening"; fi
-          fi
-          python auto_reporter.py $SLOT
+          python auto_reporter.py ${{ github.event.inputs.slot || 'evening' }}
