@@ -58,6 +58,8 @@ def summarize_with_gemini(raw_report_text: str, api_key: str = None) -> str:
         return "❌ GEMINI_API_KEY가 설정되지 않았습니다."
     
     client = genai.Client(api_key=key)
+    
+    # gemini-2.5-flash 모델 호출
     response = client.models.generate_content(
         model="gemini-2.5-flash",
         contents=f"다음 수집된 기사들을 위의 [규칙]과 [출력 예시]에 맞춰 완벽하게 요약 정리해 출력하십시오. 빈 줄 없이 붙여 써야 합니다:\n\n{raw_report_text}",
