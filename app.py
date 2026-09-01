@@ -7,7 +7,7 @@ from collector import (
 )
 from summarizer import summarize_with_gemini
 
-# === 네이버 & 제미나이 인증 정보 ===
+# === 인증 정보 안전 로드 ===
 def get_secret(key_name, default_val=""):
     try:
         if key_name in st.secrets:
@@ -16,8 +16,8 @@ def get_secret(key_name, default_val=""):
         pass
     return os.environ.get(key_name, default_val)
 
-NAVER_CLIENT_ID = get_secret("NAVER_CLIENT_ID", "R7Q2OeVNhj8wZtNNFBwL")[cite: 1]
-NAVER_CLIENT_SECRET = get_secret("NAVER_CLIENT_SECRET", "49E810CBKY")[cite: 1]
+NAVER_CLIENT_ID = get_secret("NAVER_CLIENT_ID", "R7Q2OeVNhj8wZtNNFBwL")
+NAVER_CLIENT_SECRET = get_secret("NAVER_CLIENT_SECRET", "49E810CBKY")
 GEMINI_API_KEY = get_secret("GEMINI_API_KEY", "AIzaSyB8-_Lm6lxuDXwpf9jgXIJpqmY3tRLosQg")
 
 st.set_page_config(page_title="법조 단독·통신기사 보고 생성기 (테스트)", layout="wide")
