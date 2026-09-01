@@ -42,11 +42,15 @@ def get_content(url, selector):
     except:
         return ""
 
-def fetch_articles_concurrently(article_list, selector, selected_keywords):
+def fetch_articles_concurrently(article_list, selector, selected_keywords, progress_callback=None, source_name=""):
     results = []
+    total = len(article_list)
+    if total == 0:
+        return results
+        
     with ThreadPoolExecutor(max_workers=30) as executor:
         futures = {executor.submit(get_content, art['url'], selector): art for art in article_list}
-        for future in as_completed(futures):
+        for i, future in enumerate(as_completed(futures)):
             art = futures[future]
             try:
                 content = future.result()
@@ -54,11 +58,16 @@ def fetch_articles_concurrently(article_list, selector, selected_keywords):
                     art['content'] = content
                     results.append(art)
             except:
-                continue
+                pass
+            if progress_callback:
+                progress_callback((i + 1) / total, f"[{source_name}] 본문 수집 중... ({i+1}/{total}건)")
     return results
 
-def parse_yonhap(start_dt, end_dt, selected_keywords):
+def parse_yonhap(start_dt, end_dt, selected_keywords, progress_callback=None):
     collected, page = [], 1
+    if progress_callback:
+        progress_callback(0.0, "🔍 [연합뉴스] 기사 목록 수집 중...")
+        
     while True:
         url = f"https://www.yna.co.kr/society/all/{page}"
         try:
@@ -81,7 +90,7 @@ def parse_yonhap(start_dt, end_dt, selected_keywords):
             except:
                 continue
             if dt < start_dt:
-                return fetch_articles_concurrently(collected, "div.story-news.article", selected_keywords)
+                return fetch_articles_concurrently(collected, "div.story-news.article", selected_keywords, progress_callback, "연합뉴스")
             if start_dt <= dt <= end_dt:
                 collected.append({
                     "source": "연합뉴스", "datetime": dt, "title": title_tag.text.strip(),
@@ -89,10 +98,13 @@ def parse_yonhap(start_dt, end_dt, selected_keywords):
                 })
         page += 1
         t.sleep(0.3)
-    return fetch_articles_concurrently(collected, "div.story-news.article", selected_keywords)
+    return fetch_articles_concurrently(collected, "div.story-news.article", selected_keywords, progress_callback, "연합뉴스")
 
-def parse_newsis(start_dt, end_dt, selected_keywords):
+def parse_newsis(start_dt, end_dt, selected_keywords, progress_callback=None):
     collected, page = [], 1
+    if progress_callback:
+        progress_callback(0.0, "🔍 [뉴시스] 기사 목록 수집 중...")
+        
     while True:
         url = f"https://www.newsis.com/society/list/?cid=10200&scid=10201&page={page}"
         try:
@@ -111,7 +123,7 @@ def parse_newsis(start_dt, end_dt, selected_keywords):
                     continue
                 dt = datetime.strptime(match.group(), "%Y.%m.%d %H:%M:%S").replace(tzinfo=ZoneInfo("Asia/Seoul"))
                 if dt < start_dt:
-                    return fetch_articles_concurrently(collected, "div.viewer", selected_keywords)
+                    return fetch_articles_concurrently(collected, "div.viewer", selected_keywords, progress_callback, "뉴시스")
                 if start_dt <= dt <= end_dt:
                     collected.append({
                         "source": "뉴시스", "datetime": dt, "title": title_tag.get_text(strip=True),
@@ -120,7 +132,7 @@ def parse_newsis(start_dt, end_dt, selected_keywords):
             page += 1
         except:
             break
-    return fetch_articles_concurrently(collected, "div.viewer", selected_keywords)
+    return fetch_articles_concurrently(collected, "div.viewer", selected_keywords, progress_callback, "뉴시스")
 
 def naver_extract_title_and_body_fast(client: httpx.Client, url: str):
     try:
@@ -156,7 +168,7 @@ def naver_extract_media_name(url):
     except:
         return "기타"
 
-def parse_naver_exclusive(start_dt, end_dt, selected_keywords, client_id, client_secret):
+def parse_naver_exclusive(start_dt, end_dt, selected_keywords, client_id, client_secret, progress_callback=None):
     headers = {"X-Naver-Client-Id": client_id, "X-Naver-Client-Secret": client_secret}
     seen_links = set()
     candidate_items = []
@@ -164,10 +176,16 @@ def parse_naver_exclusive(start_dt, end_dt, selected_keywords, client_id, client
     MAX_PAST_STREAK = 20
     should_stop = False
 
+    steps = list(range(1, 1001, 100))
+    total_steps = len(steps)
+
     with httpx.Client(timeout=4.0) as api_client:
-        for start_index in range(1, 1001, 100):
+        for idx, start_index in enumerate(steps):
             if should_stop:
                 break
+            if progress_callback:
+                progress_callback(idx / total_steps, f"🔍 [단독기사] 네이버 API 탐색 중... (후보 {len(candidate_items)}건 발견)")
+
             params = {"query": "[단독]", "sort": "date", "display": 100, "start": start_index}
             try:
                 res = api_client.get("https://openapi.naver.com/v1/search/news.json", headers=headers, params=params)
@@ -210,6 +228,8 @@ def parse_naver_exclusive(start_dt, end_dt, selected_keywords, client_id, client
                 candidate_items.append((item, pub_dt))
 
     all_articles = []
+    total_candidates = len(candidate_items)
+    
     def process_candidate(candidate):
         item, pub_dt = candidate
         link = item.get("link")
@@ -237,11 +257,13 @@ def parse_naver_exclusive(start_dt, end_dt, selected_keywords, client_id, client
         }
 
     with ThreadPoolExecutor(max_workers=30) as executor:
-        futures = [executor.submit(process_candidate, c) for c in candidate_items]
-        for future in as_completed(futures):
+        futures = {executor.submit(process_candidate, c): c for c in candidate_items}
+        for i, future in enumerate(as_completed(futures)):
             res = future.result()
             if res:
                 all_articles.append(res)
+            if progress_callback and total_candidates > 0:
+                progress_callback((i + 1) / total_candidates, f"📄 [단독기사] 본문 키워드 매칭 중... ({i+1}/{total_candidates}건)")
 
     all_articles.sort(key=lambda x: x["datetime"], reverse=True)
     return all_articles
