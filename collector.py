@@ -54,9 +54,12 @@ def fetch_articles_concurrently(article_list, selector, selected_keywords, progr
             art = futures[future]
             try:
                 content = future.result()
-                if any(kw in content for kw in selected_keywords):
-                    art['content'] = content
-                    results.append(art)
+                matched = [kw for kw in selected_keywords if kw in content]
+                if selected_keywords and not matched:
+                    continue
+                art['content'] = content
+                art['matched_kw'] = matched
+                results.append(art)
             except:
                 pass
             if progress_callback:
