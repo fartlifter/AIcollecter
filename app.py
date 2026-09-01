@@ -7,10 +7,18 @@ from collector import (
 )
 from summarizer import summarize_with_gemini
 
-# [Streamlit Cloud Secrets / 환경변수 연동][cite: 1]
-NAVER_CLIENT_ID = st.secrets.get("NAVER_CLIENT_ID", os.environ.get("NAVER_CLIENT_ID", "R7Q2OeVNhj8wZtNNFBwL"))[cite: 1]
-NAVER_CLIENT_SECRET = st.secrets.get("NAVER_CLIENT_SECRET", os.environ.get("NAVER_CLIENT_SECRET", "49E810CBKY"))[cite: 1]
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
+# === 네이버 & 제미나이 인증 정보 ===
+def get_secret(key_name, default_val=""):
+    try:
+        if key_name in st.secrets:
+            return st.secrets[key_name]
+    except Exception:
+        pass
+    return os.environ.get(key_name, default_val)
+
+NAVER_CLIENT_ID = get_secret("NAVER_CLIENT_ID", "R7Q2OeVNhj8wZtNNFBwL")[cite: 1]
+NAVER_CLIENT_SECRET = get_secret("NAVER_CLIENT_SECRET", "49E810CBKY")[cite: 1]
+GEMINI_API_KEY = get_secret("GEMINI_API_KEY", "AIzaSyB8-_Lm6lxuDXwpf9jgXIJpqmY3tRLosQg")
 
 st.set_page_config(page_title="법조 단독·통신기사 보고 생성기 (테스트)", layout="wide")
 st.title("📰 법조 단독·통신기사 보고 생성기 (테스트)")
