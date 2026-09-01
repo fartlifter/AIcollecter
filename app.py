@@ -7,7 +7,6 @@ from collector import (
 )
 from summarizer import summarize_with_gemini
 
-# === 인증 정보 안전 로드 ===
 def get_secret(key_name, default_val=""):
     try:
         if key_name in st.secrets:
@@ -82,15 +81,29 @@ st.info(f"선택 모드: **{st.session_state.report_slot}보고** | 수집 범�
 selected_groups = st.multiselect("키워드 그룹 선택", options=list(KEYWORD_GROUPS.keys()), default=['법원'])
 selected_keywords = [kw for g in selected_groups for kw in KEYWORD_GROUPS[g]]
 
+# === 기사 수집 실행 ===
 if st.button("🚀 기사 수집 시작", type="primary", use_container_width=True):
-    with st.spinner("통신기사 및 네이버 단독기사를 고속 수집 중입니다..."):
-        wire = parse_yonhap(start_dt, end_dt, selected_keywords) + parse_newsis(start_dt, end_dt, selected_keywords)
-        naver = parse_naver_exclusive(start_dt, end_dt, selected_keywords, NAVER_CLIENT_ID, NAVER_CLIENT_SECRET)
-        st.session_state.wire_articles = wire
-        st.session_state.naver_articles = naver
-        st.session_state.gemini_summary = ""
-        st.success(f"수집 완료: 통신기사 {len(wire)}건 / 단독기사 {len(naver)}건")
+    progress_bar = st.progress(0.0)
+    status_text = st.empty()
 
+    def update_progress(val, text):
+        progress_bar.progress(min(max(val, 0.0), 1.0))
+        status_text.info(text)
+
+    yonhap = parse_yonhap(start_dt, end_dt, selected_keywords, progress_callback=update_progress)
+    newsis = parse_newsis(start_dt, end_dt, selected_keywords, progress_callback=update_progress)
+    wire = yonhap + newsis
+    naver = parse_naver_exclusive(start_dt, end_dt, selected_keywords, NAVER_CLIENT_ID, NAVER_CLIENT_SECRET, progress_callback=update_progress)
+
+    progress_bar.empty()
+    status_text.empty()
+
+    st.session_state.wire_articles = wire
+    st.session_state.naver_articles = naver
+    st.session_state.gemini_summary = ""
+    st.success(f"✅ 수집 완료: 통신기사 {len(wire)}건 (연합 {len(yonhap)}건 / 뉴시스 {len(newsis)}건) | 단독기사 {len(naver)}건")
+
+# === 기사 리스트 (전문 전체 표시 & 링크 추가) ===
 col_w, col_n = st.columns(2)
 selected_wires, selected_navers = [], []
 
@@ -98,9 +111,10 @@ with col_w:
     st.subheader(f"◆ 통신기사 ({len(st.session_state.wire_articles)}건)")
     for idx, art in enumerate(st.session_state.wire_articles):
         with st.expander(f"{art['source']} | {art['title']}"):
-            checked = st.checkbox("선택", key=f"w_chk_{idx}")
-            st.caption(f"{art['datetime'].strftime('%H:%M')} | {art['url']}")
-            st.write(art['content'][:200] + "...")
+            checked = st.checkbox("이 기사 선택", key=f"w_chk_{idx}")
+            st.markdown(f"[🔗 원문 링크]({art['url']})")
+            st.caption(f"{art['datetime'].strftime('%Y-%m-%d %H:%M')}")
+            st.write(art['content'])  # 전문 전체 출력
             if checked:
                 selected_wires.append(art)
 
@@ -108,12 +122,14 @@ with col_n:
     st.subheader(f"◆ 단독기사 ({len(st.session_state.naver_articles)}건)")
     for idx, art in enumerate(st.session_state.naver_articles):
         with st.expander(f"[{art['매체']}] {art['title']}"):
-            checked = st.checkbox("선택", key=f"n_chk_{idx}")
-            st.caption(f"{art['datetime'].strftime('%H:%M')} | 일치: {', '.join(art['matched_kw'])}")
-            st.write(art['content'][:200] + "...")
+            checked = st.checkbox("이 기사 선택", key=f"n_chk_{idx}")
+            st.markdown(f"[🔗 원문 링크]({art['url']})")
+            st.caption(f"{art['datetime'].strftime('%Y-%m-%d %H:%M')} | 일치: {', '.join(art['matched_kw'])}")
+            st.write(art['content'])  # 전문 전체 출력
             if checked:
                 selected_navers.append(art)
 
+# === 공백 줄 없는 보고서 빌더 ===
 def build_raw_report(slot, groups, wires, navers):
     if set(groups) == {'법원'}:
         tag = "법원"
@@ -123,7 +139,7 @@ def build_raw_report(slot, groups, wires, navers):
         tag = "법조"
     
     slot_name = "오전" if slot == "수동" else slot
-    header = f"<{slot_name}보고>{tag}\n"
+    lines = [f"<{slot_name}보고>{tag}"]
     
     if slot_name == "오전":
         section_wire, wire_prefix = "【사회면】", "△"
@@ -132,18 +148,19 @@ def build_raw_report(slot, groups, wires, navers):
     else:
         section_wire, wire_prefix = "【2판】", "△NEW/"
         
-    body = header
     if wires:
-        body += f"{section_wire}\n"
+        lines.append(section_wire)
         for w in wires:
-            body += f"{wire_prefix}{w['title']}\n-{w['content'].strip()}\n\n"
+            lines.append(f"{wire_prefix}{w['title']}")
+            lines.append(f"-{w['content'].strip()}")
             
     if navers:
-        body += "【타지】\n"
+        lines.append("【타지】")
         for n in navers:
-            body += f"△{n['매체']}/{n['title']}\n-{n['content'].strip()}\n\n"
+            lines.append(f"△{n['매체']}/{n['title']}")
+            lines.append(f"-{n['content'].strip()}")
             
-    return body.strip()
+    return "\n".join(lines).strip()
 
 raw_report_text = build_raw_report(st.session_state.report_slot, selected_groups, selected_wires, selected_navers)
 
@@ -152,7 +169,7 @@ st.subheader("📋 최종 보고서 생성 및 복사")
 
 col_t1, col_t2 = st.columns([1, 1])
 with col_t1:
-    st.markdown("**1️⃣ 원문 취합본 (선택된 기사)**")
+    st.markdown("**1️⃣ 원문 취합본 (선택된 기사 / 공백 줄 없음)**")
     st.code(raw_report_text if (selected_wires or selected_navers) else "선택된 기사가 없습니다.", language="markdown")
 
 with col_t2:
@@ -163,7 +180,7 @@ with col_t2:
         if not (selected_wires or selected_navers):
             st.warning("요약할 기사를 먼저 체크박스로 선택해주세요.")
         else:
-            with st.spinner("Gemini가 3문장 보고서 양식으로 정제 요약 중입니다..."):
+            with st.spinner("Gemini가 GEM 지침에 맞춰 정제 요약 중입니다..."):
                 summary_result = summarize_with_gemini(raw_report_text, api_key_input)
                 st.session_state.gemini_summary = summary_result
                 
