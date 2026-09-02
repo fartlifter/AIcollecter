@@ -192,7 +192,7 @@ def build_raw_report(slot, groups, wires, navers):
 
 raw_report_text = build_raw_report(st.session_state.report_slot, selected_groups, selected_wires, selected_navers)
 
-# === 최종 보고서 생성창 ===
+# === 최종 보고서 생성창 (스트리밍 적용) ===
 st.divider()
 st.subheader("📋 최종 보고서 생성 및 복사")
 
@@ -202,19 +202,22 @@ with col_t1:
     st.code(raw_report_text if (selected_wires or selected_navers) else "선택된 기사가 없습니다.", language="markdown")
 
 with col_t2:
-    st.markdown("**2️⃣ Gemini 정제 요약본 (GEM 규격 3문장 요약)**")
+    st.markdown("**2️⃣ Gemini 실시간 정제 요약본**")
     
     if st.button("🤖 선택 기사 Gemini 요약 실행", type="primary", use_container_width=True):
         if not (selected_wires or selected_navers):
             st.warning("요약할 기사를 먼저 체크박스로 선택해주세요.")
         else:
-            with st.spinner("Gemini가 GEM 지침에 맞춰 정제 요약 중입니다..."):
-                try:
-                    summary_result = summarize_with_gemini(raw_report_text, GEMINI_API_KEY)
-                    st.session_state.gemini_summary = summary_result
-                except Exception as e:
-                    st.error(f"요약 중 오류가 발생했습니다: {e}")
+            stream_container = st.empty()
+            full_text = ""
+            
+            # 실시간 글자 타이핑 렌더링
+            for chunk in summarize_with_gemini_stream(raw_report_text, GEMINI_API_KEY):
+                full_text += chunk
+                stream_container.code(full_text, language="markdown")
                 
-    if st.session_state.gemini_summary:
+            st.session_state.gemini_summary = full_text.strip()
+                
+    elif st.session_state.gemini_summary:
         st.code(st.session_state.gemini_summary, language="markdown")
         st.caption("✅ 위 박스 우측 상단의 복사 아이콘을 눌러 클립보드에 복사하세요.")
