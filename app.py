@@ -7,7 +7,7 @@ import html
 from collector import (
     KEYWORD_GROUPS, parse_yonhap, parse_newsis, parse_naver_exclusive
 )
-from summarizer import summarize_with_gemini
+from summarizer import summarize_with_gemini, summarize_with_gemini_stream
 
 # === 보안 인증 정보 로드 ===
 def get_secret(key_name, default_val=""):
@@ -192,7 +192,7 @@ def build_raw_report(slot, groups, wires, navers):
 
 raw_report_text = build_raw_report(st.session_state.report_slot, selected_groups, selected_wires, selected_navers)
 
-# === 최종 보고서 생성창 (스트리밍 적용) ===
+# === 최종 보고서 생성창 (실시간 스트리밍) ===
 st.divider()
 st.subheader("📋 최종 보고서 생성 및 복사")
 
@@ -210,13 +210,13 @@ with col_t2:
         else:
             stream_container = st.empty()
             full_text = ""
-            
-            # 실시간 글자 타이핑 렌더링
-            for chunk in summarize_with_gemini_stream(raw_report_text, GEMINI_API_KEY):
-                full_text += chunk
-                stream_container.code(full_text, language="markdown")
-                
-            st.session_state.gemini_summary = full_text.strip()
+            try:
+                for chunk in summarize_with_gemini_stream(raw_report_text, GEMINI_API_KEY):
+                    full_text += chunk
+                    stream_container.code(full_text, language="markdown")
+                st.session_state.gemini_summary = full_text.strip()
+            except Exception as e:
+                st.error(f"요약 중 오류가 발생했습니다: {e}")
                 
     elif st.session_state.gemini_summary:
         st.code(st.session_state.gemini_summary, language="markdown")
