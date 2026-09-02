@@ -38,25 +38,18 @@ SYSTEM_INSTRUCTION = """
 - 따옴표 정자 교정: 일자형(' ") 금지, 반드시 유니코드 정자 따옴표(‘ ’, “ ”)로 여닫는 방향을 맞춰 출력.
 - 숫자 표기: 만 단위 미만 한글 표기 금지 (예: 1억2000만원, 3000만원 / 1억2천만원 금지), 쉼표 제거.
 - 호칭: 성씨+씨/모는 붙여 쓰고(김모씨, 홍 전 회장), 직함은 띄어 쓴다(우인성 부장판사, 윤갑근 변호사).
-
-[출력 예시 기준]
-<저녁보고>법원
-【2판】
-△NEW/故김남주 시인, ‘남민전 사건’ 재심서 46년 만에 무죄
--서울중앙지법 형사28부(재판장 한대균), 2일 1979년 남민전 준비위원회 가입 혐의로 구속돼 이듬해 징역 15년 선고받고 1994년 췌장암으로 사망한 고 김남주 시인 재심에서 46년 만에 무죄 선고. 재판부는 김 시인에 대한 불법 구금과 폭행·협박 등 가혹행위가 이뤄졌다고 판단해 모든 혐의에 무죄 선고.
-【타지】
-△SBS/아시안게임 앞둔 지소연, 첼시 시절 에이전트와 소송서 완승
--서울고법 민사33부(재판장 이창형), 지난달 20일 첼시 시절 에이전트 김모씨가 여자 축구대표팀 주장 지소연 상대로 제기한 수수료 소송 2심에서 김씨의 항소 기각. 김씨는 지소연이 2018년 자신과 독점 중개인 계약 맺은 뒤 7개월 만에 일방적으로 계약해지했다고 주장했으나, 재판부는 김씨가 이중계약 문제 지소연에게 알리지 않고 신뢰 관계 먼저 깨뜨렸다고 판단. →참고하겠습니다.
 """
 
-def summarize_with_gemini(raw_report_text: str, api_key: str = None) -> str:
+def summarize_with_gemini_stream(raw_report_text: str, api_key: str = None):
+    """글자가 생성되는 즉시 한 조각씩 스트리밍해주는 제너레이터 함수"""
     key = api_key or os.environ.get("GEMINI_API_KEY")
     if not key:
-        return "❌ GEMINI_API_KEY가 설정되지 않았습니다."
+        yield "❌ GEMINI_API_KEY가 설정되지 않았습니다."
+        return
     
     client = genai.Client(api_key=key)
     
-    response = client.models.generate_content(
+    response = client.models.generate_content_stream(
         model="gemini-2.5-flash",
         contents=f"다음 수집된 기사들을 위의 [역할 정의] 및 [1. 주어 선정 절대 규칙]에 따라 법조팀 보고 양식으로 완벽하게 요약 정리하십시오:\n\n{raw_report_text}",
         config=types.GenerateContentConfig(
@@ -64,4 +57,10 @@ def summarize_with_gemini(raw_report_text: str, api_key: str = None) -> str:
             temperature=0.0
         )
     )
-    return response.text.strip()
+    for chunk in response:
+        if chunk.text:
+            yield chunk.text
+
+def summarize_with_gemini(raw_report_text: str, api_key: str = None) -> str:
+    """기존 일괄 호출 함수 유지 (자동화 스크립트 호환용)"""
+    return "".join(list(summarize_with_gemini_stream(raw_report_text, api_key)))
