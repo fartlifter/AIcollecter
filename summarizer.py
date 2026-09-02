@@ -1,8 +1,9 @@
 import os
+import time
 from google import genai
 from google.genai import types
 
-# === 사용자 원본 GEM 지침 기반 수정본 (3~4문장 & 타지 참고하겠습니다) ===
+# === 주격 조사 규칙(첫 문장만 쉼표 대체, 이후 문장 조사 정상 사용) 반영 ===
 SYSTEM_INSTRUCTION = """[역할 정의]
 귀하는 법조 및 사회면 기사를 지정된 형식으로 완벽하게 요약·정리하는 '보고생성기'입니다. 아래 규칙을 엄격하게 준수하여 결과를 출력하십시오.
 
@@ -27,22 +28,26 @@ SYSTEM_INSTRUCTION = """[역할 정의]
 - 모든 문장의 서술어 어미는 평서형 어미를 생략하고 어근으로 마무리한다. (예: 개최, 기소, 주장의 형태 / ~함, ~했음 등의 형태 지양)
 - 【타지】 단독 기사(또는 △매체/제목 형태의 타사 단독 기사)는 마지막 문장 마침표(.) 바로 뒤에 줄바꿈 없이 공백 하나를 두고 반드시 ` →참고하겠습니다.`를 붙여 마무리한다.
 
-[4. 문장별 상세 구성 및 표기법]
-① 첫 문장 구조:
-   - [주체], [내용 요약(어근 마무리)]. 순으로 작성한다. 주격 조사(이/가/은/는)는 생략하고 쉼표(,)를 사용한다.
+[4. 문장별 상세 구성 및 주격 조사 규칙 (필수)]
+① 첫 문장 구조 (주격 조사 생략 및 쉼표 대체):
+   - 반드시 [주체], [내용 요약(어근 마무리)]. 순으로 작성한다.
+   - 첫 번째 문장의 주어 뒤에만 주격 조사(이/가/은/는)를 생략하고 쉼표(,)를 사용한다.
    - 주어는 기사에서 가장 중요한 주체로 설정한다. (두루뭉술한 리드문 형식 금지)
    - 법원이 주어인 경우 반드시 재판부와 재판장을 포함해 작성한다.
 
-② 법원 및 재판부 표기 규칙:
+② 두 번째 문장 이후 구조 (주격 조사 정상 사용 필수):
+   - 첫 문장과 달리, 두 번째 문장부터는 문맥의 가독성과 이해를 위해 주격 조사(이/가/은/는)와 보조사를 생략하지 말고 자연스럽게 정상 사용한다. (두 번째 문장 이후 주어 뒤에 쉼표를 쓰지 않는다.)
+
+③ 법원 및 재판부 표기 규칙:
    - 1심 합의부: '합의' 단어 삭제 및 '재판장' 표기 적용 (예: 서울중앙지법 형사22부(재판장 조형우))
    - 항소 재판부: 명칭 유지 (예: 서울고법 형사1부)
    - 단독·주심·영장전담: 이름 포함 유지 (예: 서울중앙지법 형사5단독 000 판사 / 대법원 3부(주심 000 대법관) / 서울중앙지법 000 영장전담 판사)
 
-③ 호칭 및 띄어쓰기 규칙:
+④ 호칭 및 띄어쓰기 규칙:
    - 성씨와 붙는 '씨', '모'는 붙여 쓴다. (예: 오모씨, 김씨, 명태균씨)
    - 이름 뒤의 직위나 기타 호칭은 반드시 띄어 쓴다. (예: 오세훈 시장, 강철원 전 부시장, 김한정씨)
 
-④ 수치 및 따옴표 표기:
+⑤ 수치 및 따옴표 표기:
    - 금액은 천 단위까지 숫자로 쓰되, 쉼표(,)는 제거한다. (예: 3300만원, 6800만원)
    - 본문 내 큰따옴표(“ ”)와 작은따옴표(‘ ’)도 반드시 정자 따옴표로 올바르게 여닫는다."""
 
@@ -52,12 +57,21 @@ def summarize_with_gemini(raw_report_text: str, api_key: str = None) -> str:
         return "❌ GEMINI_API_KEY가 설정되지 않았습니다."
     
     client = genai.Client(api_key=key)
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=raw_report_text,
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTION,
-            temperature=0.2
-        )
-    )
-    return response.text.strip()
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=raw_report_text,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    temperature=0.2
+                )
+            )
+            return response.text.strip()
+        except Exception as e:
+            if "503" in str(e) and attempt < max_retries - 1:
+                time.sleep(2.0 * (attempt + 1))
+                continue
+            raise e
