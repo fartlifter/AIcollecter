@@ -4,13 +4,12 @@ from zoneinfo import ZoneInfo
 import os
 import re
 import html
-import httpx
 from collector import (
     KEYWORD_GROUPS, parse_yonhap, parse_newsis, parse_naver_exclusive
 )
 from summarizer import summarize_with_gemini
 
-# === 보안 인증 정보 로드 (Secrets 우선) ===
+# === 보안 인증 정보 로드 ===
 def get_secret(key_name, default_val=""):
     try:
         if key_name in st.secrets:
@@ -22,22 +21,6 @@ def get_secret(key_name, default_val=""):
 NAVER_CLIENT_ID = get_secret("NAVER_CLIENT_ID", "R7Q2OeVNhj8wZtNNFBwL")
 NAVER_CLIENT_SECRET = get_secret("NAVER_CLIENT_SECRET", "49E810CBKY")
 GEMINI_API_KEY = get_secret("GEMINI_API_KEY", "")
-TELEGRAM_BOT_TOKEN = get_secret("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = get_secret("TELEGRAM_CHAT_ID", "")
-
-def send_to_telegram(text: str):
-    """텔레그램 메시지 분할 전송 함수"""
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return False, "텔레그램 토큰 또는 Chat ID가 설정되지 않았습니다."
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    try:
-        for chunk in [text[i:i+4000] for i in range(0, len(text), 4000)]:
-            res = httpx.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": chunk}, timeout=10.0)
-            if res.status_code != 200:
-                return False, f"전송 실패: {res.text}"
-        return True, "전송 성공"
-    except Exception as e:
-        return False, f"오류 발생: {e}"
 
 st.set_page_config(page_title="법조 단독·통신기사 보고 생성기", layout="wide")
 st.title("📰 법조 단독·통신기사 보고 생성기")
@@ -134,12 +117,13 @@ if st.button("🚀 기사 수집 시작", type="primary", use_container_width=Tr
     st.session_state.gemini_summary = ""
     st.success(f"✅ 수집 완료: 통신기사 {len(wire)}건 (연합 {len(yonhap)}건 / 뉴시스 {len(newsis)}건) | 단독기사 {len(naver)}건")
 
-# === 기사 리스트 ===
-col_w, col_n = st.columns(2)
-selected_wires, selected_navers = [], []
+# === 기사 리스트: 1단 세로 배치 (통신기사 먼저 -> 단독기사 아래) ===
+selected_wires = []
+selected_navers = []
 
-with col_w:
-    st.subheader(f"◆ 통신기사 ({len(st.session_state.wire_articles)}건)")
+st.divider()
+st.subheader(f"◆ 통신기사 ({len(st.session_state.wire_articles)}건)")
+if st.session_state.wire_articles:
     for idx, art in enumerate(st.session_state.wire_articles):
         matched = art.get('matched_kw', [])
         with st.expander(f"{art['source']} | {art['title']}"):
@@ -152,9 +136,12 @@ with col_w:
             
             if checked:
                 selected_wires.append(art)
+else:
+    st.caption("수집된 통신기사가 없습니다.")
 
-with col_n:
-    st.subheader(f"◆ 단독기사 ({len(st.session_state.naver_articles)}건)")
+st.divider()
+st.subheader(f"◆ 단독기사 ({len(st.session_state.naver_articles)}건)")
+if st.session_state.naver_articles:
     for idx, art in enumerate(st.session_state.naver_articles):
         matched = art.get('matched_kw', [])
         with st.expander(f"[{art['매체']}] {art['title']}"):
@@ -167,6 +154,8 @@ with col_n:
             
             if checked:
                 selected_navers.append(art)
+else:
+    st.caption("수집된 단독기사가 없습니다.")
 
 # === 공백 줄 없는 보고서 빌더 ===
 def build_raw_report(slot, groups, wires, navers):
@@ -203,8 +192,9 @@ def build_raw_report(slot, groups, wires, navers):
 
 raw_report_text = build_raw_report(st.session_state.report_slot, selected_groups, selected_wires, selected_navers)
 
+# === 최종 보고서 생성창 ===
 st.divider()
-st.subheader("📋 최종 보고서 생성 및 텔레그램 발송")
+st.subheader("📋 최종 보고서 생성 및 복사")
 
 col_t1, col_t2 = st.columns([1, 1])
 with col_t1:
@@ -212,7 +202,7 @@ with col_t1:
     st.code(raw_report_text if (selected_wires or selected_navers) else "선택된 기사가 없습니다.", language="markdown")
 
 with col_t2:
-    st.markdown("**2️⃣ Gemini 정제 요약본**")
+    st.markdown("**2️⃣ Gemini 정제 요약본 (GEM 규격 3문장 요약)**")
     
     if st.button("🤖 선택 기사 Gemini 요약 실행", type="primary", use_container_width=True):
         if not (selected_wires or selected_navers):
@@ -227,11 +217,4 @@ with col_t2:
                 
     if st.session_state.gemini_summary:
         st.code(st.session_state.gemini_summary, language="markdown")
-        
-        if st.button("🚀 위 요약본을 텔레그램으로 즉시 전송", type="secondary", use_container_width=True):
-            with st.spinner("텔레그램으로 발송 중입니다..."):
-                ok, msg = send_to_telegram(st.session_state.gemini_summary)
-                if ok:
-                    st.success("✅ 텔레그램 전송이 완료되었습니다!")
-                else:
-                    st.error(f"❌ {msg}")
+        st.caption("✅ 위 박스 우측 상단의 복사 아이콘을 눌러 클립보드에 복사하세요.")
