@@ -26,21 +26,6 @@ GEMINI_API_KEYS = [k.strip() for k in str(raw_keys).split(",") if k.strip()]
 
 st.set_page_config(page_title="법조 단독·통신기사 보고 생성기", layout="wide")
 
-# === 코드 박스 자동 줄바꿈 CSS 주입 (가로 스크롤 방지 & 복사 시 원문 한줄 유지) ===
-st.markdown("""
-<style>
-div[data-testid="stCodeBlock"] pre {
-    white-space: pre-wrap !important;
-    word-break: break-all !important;
-    overflow-x: hidden !important;
-}
-div[data-testid="stCodeBlock"] code {
-    white-space: pre-wrap !important;
-    word-break: break-all !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
 st.title("📰 법조 단독·통신기사 보고 생성기")
 
 now = datetime.now(ZoneInfo("Asia/Seoul"))
@@ -210,7 +195,7 @@ def build_raw_report(slot, groups, wires, navers):
 
 raw_report_text = build_raw_report(st.session_state.report_slot, selected_groups, selected_wires, selected_navers)
 
-# === 최종 보고서 생성창 (좌우 2열 분할 + 자동 줄바꿈) ===
+# === 최종 보고서 생성창 (좌우 2열 분할 + 자동 줄바꿈 텍스트 에어리어) ===
 st.divider()
 st.subheader("📋 최종 보고서 생성 및 복사")
 
@@ -218,7 +203,8 @@ col_t1, col_t2 = st.columns([1, 1])
 
 with col_t1:
     st.markdown("**1️⃣ 원문 취합본 (선택된 기사)**")
-    st.code(raw_report_text if (selected_wires or selected_navers) else "선택된 기사가 없습니다.", language="markdown")
+    display_raw = raw_report_text if (selected_wires or selected_navers) else "선택된 기사가 없습니다."
+    st.text_area("원문 취합본", value=display_raw, height=480, disabled=True, label_visibility="collapsed")
 
 with col_t2:
     st.markdown("**2️⃣ Gemini 정제 요약본**")
@@ -234,6 +220,7 @@ with col_t2:
                 except Exception as e:
                     st.error(f"요약 중 오류가 발생했습니다: {e}")
                 
+    display_sum = st.session_state.gemini_summary if st.session_state.gemini_summary else "요약 실행 버튼을 누르면 정제된 결과가 여기에 표시됩니다."
+    st.text_area("Gemini 요약본", value=display_sum, height=425, disabled=False, label_visibility="collapsed")
     if st.session_state.gemini_summary:
-        st.code(st.session_state.gemini_summary, language="markdown")
-        st.caption("✅ 위 박스 우측 상단의 복사 아이콘을 눌러 클립보드에 복사하세요.")
+        st.caption("✅ 위 텍스트 박스 안의 내용을 드래그(Cmd+A)하여 복사하세요. (화면상 줄바꿈되더라도 복사 시 원문 한 줄 유지)")
