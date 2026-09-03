@@ -9,7 +9,7 @@ from collector import (
 )
 from summarizer import summarize_with_gemini
 
-# === 보안 인증 정보 로드 ===
+# === 보안 인증 정보 로드 (Secrets 다중 키 지원) ===
 def get_secret(key_name, default_val=""):
     try:
         if key_name in st.secrets:
@@ -20,7 +20,9 @@ def get_secret(key_name, default_val=""):
 
 NAVER_CLIENT_ID = get_secret("NAVER_CLIENT_ID", "R7Q2OeVNhj8wZtNNFBwL")
 NAVER_CLIENT_SECRET = get_secret("NAVER_CLIENT_SECRET", "49E810CBKY")
-GEMINI_API_KEY = get_secret("GEMINI_API_KEY", "")
+
+raw_keys = get_secret("GEMINI_API_KEYS", get_secret("GEMINI_API_KEY", ""))
+GEMINI_API_KEYS = [k.strip() for k in str(raw_keys).split(",") if k.strip()]
 
 st.set_page_config(page_title="법조 단독·통신기사 보고 생성기", layout="wide")
 st.title("📰 법조 단독·통신기사 보고 생성기")
@@ -210,7 +212,7 @@ with col_t2:
         else:
             with st.spinner("Gemini가 정제 요약 중입니다..."):
                 try:
-                    summary_result = summarize_with_gemini(raw_report_text, GEMINI_API_KEY)
+                    summary_result = summarize_with_gemini(raw_report_text, GEMINI_API_KEYS)
                     st.session_state.gemini_summary = summary_result
                 except Exception as e:
                     st.error(f"요약 중 오류가 발생했습니다: {e}")
