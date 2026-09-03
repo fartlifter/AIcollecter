@@ -45,7 +45,6 @@ SYSTEM_INSTRUCTION = """[역할 정의]
 ④ 호칭 및 수치:
    - 성씨+씨/모는 붙여 쓰고(김모씨, 명태균씨), 직함은 띄어 쓴다(우인성 부장판사, 윤갑근 변호사).
    - 금액은 천 단위까지 숫자로 표기하며 쉼표(,)를 제거한다. (예: 3300만원, 1억2000만원)
-   - '김건희 여사'는 반드시 '김건희씨'로 수정. 
 """
 
 def summarize_with_gemini(raw_report_text: str, api_keys: list = None) -> str:
@@ -58,12 +57,12 @@ def summarize_with_gemini(raw_report_text: str, api_keys: list = None) -> str:
 
     last_err = None
 
-    # 키 목록을 순차 시도 (429 할당량 초과 또는 503 서버 과부하 시 다음 키로 Failover)
+    # 키 목록 순차 시도 (429 할당량 초과 또는 503 서버 과부하 시 다음 키로 Failover)
     for idx, key in enumerate(api_keys):
         try:
             client = genai.Client(api_key=key)
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.6-flash",
                 contents=raw_report_text,
                 config=types.GenerateContentConfig(
                     system_instruction=SYSTEM_INSTRUCTION,
