@@ -25,6 +25,22 @@ raw_keys = get_secret("GEMINI_API_KEYS", get_secret("GEMINI_API_KEY", ""))
 GEMINI_API_KEYS = [k.strip() for k in str(raw_keys).split(",") if k.strip()]
 
 st.set_page_config(page_title="법조 단독·통신기사 보고 생성기", layout="wide")
+
+# === 코드 박스 자동 줄바꿈 CSS 주입 (가로 스크롤 방지 & 복사 시 원문 한줄 유지) ===
+st.markdown("""
+<style>
+div[data-testid="stCodeBlock"] pre {
+    white-space: pre-wrap !important;
+    word-break: break-all !important;
+    overflow-x: hidden !important;
+}
+div[data-testid="stCodeBlock"] code {
+    white-space: pre-wrap !important;
+    word-break: break-all !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.title("📰 법조 단독·통신기사 보고 생성기")
 
 now = datetime.now(ZoneInfo("Asia/Seoul"))
@@ -194,11 +210,12 @@ def build_raw_report(slot, groups, wires, navers):
 
 raw_report_text = build_raw_report(st.session_state.report_slot, selected_groups, selected_wires, selected_navers)
 
-# === 최종 보고서 생성창 ===
+# === 최종 보고서 생성창 (좌우 2열 분할 + 자동 줄바꿈) ===
 st.divider()
 st.subheader("📋 최종 보고서 생성 및 복사")
 
 col_t1, col_t2 = st.columns([1, 1])
+
 with col_t1:
     st.markdown("**1️⃣ 원문 취합본 (선택된 기사)**")
     st.code(raw_report_text if (selected_wires or selected_navers) else "선택된 기사가 없습니다.", language="markdown")
