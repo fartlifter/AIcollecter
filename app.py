@@ -4,30 +4,100 @@ from zoneinfo import ZoneInfo
 import os
 import re
 import html
+import json
 import streamlit.components.v1 as components
 from collector import (
     KEYWORD_GROUPS, parse_yonhap, parse_newsis, parse_naver_exclusive
 )
 from summarizer import summarize_with_gemini
 
-# === 클립보드 복사 헬퍼 함수 ===
-def copy_to_clipboard_button(text_to_copy: str, btn_label: str, key_suffix: str):
-    col_l, col_r = st.columns([0.7, 0.3])
-    with col_r:
-        if st.button(f"📋 {btn_label}", key=f"btn_cp_{key_suffix}", use_container_width=True):
-            if text_to_copy and text_to_copy not in ["선택된 기사가 없습니다.", "요약 실행 버튼을 누르면 정제된 결과가 여기에 표시됩니다."]:
-                escaped_text = html.escape(text_to_copy).replace("\n", "\\n").replace("'", "\\'")
-                components.html(
-                    f"""
-                    <script>
-                    navigator.clipboard.writeText('{escaped_text}');
-                    </script>
-                    """,
-                    height=0,
-                )
-                st.toast(f"✅ {btn_label} 완료!", icon="📋")
-            else:
-                st.warning("복사할 텍스트가 없습니다.")
+# === 브라우저 네이티브 원클릭 클립보드 복사 버튼 컴포넌트 ===
+def render_clipboard_button(text_to_copy: str, btn_label: str, key: str):
+    if not text_to_copy or text_to_copy in ["선택된 기사가 없습니다.", "요약 실행 버튼을 누르면 정제된 결과가 여기에 표시됩니다."]:
+        # 비활성화된 더미 버튼
+        components.html(
+            f"""
+            <button disabled style="
+                width: 100%;
+                background-color: #2b303c;
+                color: #6b7280;
+                border: 1px solid #374151;
+                border-radius: 8px;
+                padding: 0.45rem 1rem;
+                font-size: 0.875rem;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                cursor: not-allowed;
+            ">📋 {btn_label}</button>
+            """,
+            height=45
+        )
+        return
+
+    # 줄바꿈 및 특수문자 안전 직렬화
+    safe_json = json.dumps(text_to_copy)
+    
+    html_code = f"""
+    <div id="wrapper_{key}" style="width: 100%;">
+        <button id="btn_{key}" onclick="copyText_{key}()" style="
+            width: 100%;
+            background-color: #ff4b4b;
+            color: #ffffff;
+            border: none;
+            border-radius: 8px;
+            padding: 0.45rem 1rem;
+            font-size: 0.875rem;
+            font-weight: 600;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+        ">📋 {btn_label}</button>
+    </div>
+
+    <script>
+    function copyText_{key}() {{
+        const text = {safe_json};
+        
+        // 1차 시도: Clipboard API
+        if (navigator.clipboard && window.isSecureContext) {{
+            navigator.clipboard.writeText(text).then(onSuccess).catch(fallbackCopy);
+        }} else {{
+            fallbackCopy();
+        }}
+
+        function fallbackCopy() {{
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-999999px";
+            textArea.style.top = "-999999px";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {{
+                document.execCommand('copy');
+                onSuccess();
+            }} catch (err) {{
+                alert('복사에 실패했습니다. 텍스트 박스에서 직접 드래그 복사해주세요.');
+            }}
+            document.body.removeChild(textArea);
+        }}
+
+        function onSuccess() {{
+            const btn = document.getElementById('btn_{key}');
+            const originalBg = btn.style.backgroundColor;
+            const originalText = btn.innerText;
+            btn.style.backgroundColor = '#10b981';
+            btn.innerText = '✅ 복사 완료!';
+            setTimeout(() => {{
+                btn.style.backgroundColor = originalBg;
+                btn.innerText = originalText;
+            }}, 1500);
+        }}
+    }}
+    </script>
+    """
+    components.html(html_code, height=45)
 
 # === 보안 인증 정보 로드 ===
 def get_secret(key_name, default_val=""):
@@ -214,7 +284,7 @@ def build_raw_report(slot, groups, wires, navers):
 
 raw_report_text = build_raw_report(st.session_state.report_slot, selected_groups, selected_wires, selected_navers)
 
-# === 최종 보고서 생성창 (좌우 2열 분할 + 개별 복사 버튼) ===
+# === 최종 보고서 생성창 (좌우 2열 분할 + 독립형 HTML 복사 버튼) ===
 st.divider()
 st.subheader("📋 최종 보고서 생성 및 복사")
 
@@ -223,7 +293,7 @@ col_t1, col_t2 = st.columns([1, 1])
 with col_t1:
     st.markdown("**1️⃣ 원문 취합본 (선택된 기사)**")
     display_raw = raw_report_text if (selected_wires or selected_navers) else "선택된 기사가 없습니다."
-    copy_to_clipboard_button(display_raw, "원문 취합본 복사", "raw")
+    render_clipboard_button(display_raw, "원문 취합본 클립보드 복사", "raw")
     st.text_area("원문 취합본", value=display_raw, height=480, disabled=True, label_visibility="collapsed")
 
 with col_t2:
@@ -240,5 +310,5 @@ with col_t2:
                     st.error(f"요약 중 오류가 발생했습니다: {e}")
                 
     display_sum = st.session_state.gemini_summary if st.session_state.gemini_summary else "요약 실행 버튼을 누르면 정제된 결과가 여기에 표시됩니다."
-    copy_to_clipboard_button(st.session_state.gemini_summary, "요약본 복사", "sum")
+    render_clipboard_button(st.session_state.gemini_summary, "요약본 클립보드 복사", "sum")
     st.text_area("Gemini 요약본", value=display_sum, height=425, disabled=False, label_visibility="collapsed")
