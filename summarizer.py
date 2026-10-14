@@ -103,27 +103,37 @@ def summarize_with_gemini(raw_report_text: str, api_keys: list = None) -> str:
 
     last_err = None
 
+    # 5개 키를 순회하며 요청
     for idx, key in enumerate(api_keys):
-        try:
-            client = genai.Client(api_key=key)
-            response = client.models.generate_content(
-                model="gemini-3.6-flash",
-                contents=raw_report_text,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    temperature=0.1
+        client = genai.Client(api_key=key)
+        
+        # 키당 최대 2회 시도 (503 트래픽 폭증 시 즉시 튕기지 않고 잠깐 대기 후 재시도)
+        for attempt in range(2):
+            try:
+                response = client.models.generate_content(
+                    model="gemini-3.6-flash",
+                    contents=raw_report_text,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        temperature=0.1
+                    )
                 )
-            )
-            cleaned = response.text.strip()
-            lines = [line for line in cleaned.splitlines() if line.strip()]
-            return "\n".join(lines)
+                cleaned = response.text.strip()
+                lines = [line for line in cleaned.splitlines() if line.strip()]
+                return "\n".join(lines)
 
-        except Exception as e:
-            err_str = str(e)
-            last_err = e
-            if "429" in err_str or "503" in err_str:
-                time.sleep(1)
-                continue
-            raise e
+            except Exception as e:
+                err_str = str(e)
+                last_err = e
+                
+                # 503(서버 과부하) 또는 429(할당량 초과) 발생 시
+                if "503" in err_str or "UNAVAILABLE" in err_str:
+                    time.sleep(2.5 * (attempt + 1))  # 일시 과부하가 풀릴 때까지 잠시 대기
+                    continue
+                elif "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    time.sleep(1)
+                    break  # 할당량 초과는 바로 다음 키로 교체
+                else:
+                    raise e  # 기타 문법/인증 오류는 즉시 반환
 
     raise last_err
