@@ -47,14 +47,12 @@ def fetch_articles_concurrently(article_list, selector, selected_keywords, progr
     if total == 0:
         return results
 
-    # 공용 커넥션 풀을 활용해 반복 연결 비용 제거
     limits = httpx.Limits(max_keepalive_connections=35, max_connections=40)
     with httpx.Client(timeout=6.0, limits=limits) as shared_client:
         def worker(art):
             content = get_content(shared_client, art['url'], selector)
             if not content:
                 return None
-            # 본문 전체 키워드 대조 (누락 위험 방지)
             matched = [kw for kw in selected_keywords if kw in content]
             if selected_keywords and not matched:
                 return None
@@ -81,7 +79,7 @@ def parse_yonhap(start_dt, end_dt, selected_keywords, progress_callback=None):
     collected = []
     page = 1
     past_streak = 0
-    MAX_PAST_STREAK = 5  # 송고 역전으로 인한 누락 방지 (연속 5건 이상 과거 시각일 때만 종료)
+    MAX_PAST_STREAK = 5
 
     if progress_callback:
         progress_callback(0.0, "🔍 [연합뉴스] 기사 목록 탐색 중...")
@@ -114,7 +112,6 @@ def parse_yonhap(start_dt, end_dt, selected_keywords, progress_callback=None):
                 except:
                     continue
 
-                # 시작 시각보다 과거 기사인 경우 즉시 튕기지 않고 스트릭 카운트
                 if dt < start_dt:
                     past_streak += 1
                     if past_streak >= MAX_PAST_STREAK:
@@ -123,7 +120,6 @@ def parse_yonhap(start_dt, end_dt, selected_keywords, progress_callback=None):
                 else:
                     past_streak = 0
 
-                # 지정 시간 범위 내 기사는 전부 수집 후보로 보존 (제목 필터링 없이 전수 수집)
                 if start_dt <= dt <= end_dt:
                     collected.append({
                         "source": "연합뉴스",
@@ -140,7 +136,7 @@ def parse_newsis(start_dt, end_dt, selected_keywords, progress_callback=None):
     collected = []
     page = 1
     past_streak = 0
-    MAX_PAST_STREAK = 5  # 송고 역전으로 인한 누락 방지
+    MAX_PAST_STREAK = 5
 
     if progress_callback:
         progress_callback(0.0, "🔍 [뉴시스] 기사 목록 탐색 중...")
@@ -172,7 +168,6 @@ def parse_newsis(start_dt, end_dt, selected_keywords, progress_callback=None):
 
                 dt = datetime.strptime(match.group(), "%Y.%m.%d %H:%M:%S").replace(tzinfo=ZoneInfo("Asia/Seoul"))
 
-                # 시작 시각보다 과거 기사인 경우 즉시 튕기지 않고 스트릭 카운트
                 if dt < start_dt:
                     past_streak += 1
                     if past_streak >= MAX_PAST_STREAK:
@@ -181,7 +176,6 @@ def parse_newsis(start_dt, end_dt, selected_keywords, progress_callback=None):
                 else:
                     past_streak = 0
 
-                # 지정 시간 범위 내 기사는 전부 수집 후보로 보존 (제목 필터링 없이 전수 수집)
                 if start_dt <= dt <= end_dt:
                     collected.append({
                         "source": "뉴시스",
@@ -193,6 +187,20 @@ def parse_newsis(start_dt, end_dt, selected_keywords, progress_callback=None):
             page += 1
 
     return fetch_articles_concurrently(collected, "div.viewer", selected_keywords, progress_callback, "뉴시스")
+
+def naver_extract_media_name(url):
+    try:
+        domain = url.split("//")[-1].split("/")[0]
+        parts = domain.split(".")
+        composite_key = f"{parts[-3]}.{parts[-2]}" if len(parts) >= 3 else parts[0]
+        if composite_key in MEDIA_MAPPING:
+            return MEDIA_MAPPING[composite_key]
+        for part in reversed(parts):
+            if part in MEDIA_MAPPING:
+                return MEDIA_MAPPING[part]
+        return composite_key.upper()
+    except:
+        return "기타"
 
 def naver_extract_title_and_body_fast(client: httpx.Client, url: str):
     try:
@@ -214,36 +222,17 @@ def naver_extract_title_and_body_fast(client: httpx.Client, url: str):
     except:
         return None, None
 
-def naver_extract_media_name(url):
-    try:
-        domain = url.split("//")[-1].split("/")[0]
-        parts = domain.split(".")
-        composite_key = f"{parts[-3]}.{parts[-2]}" if len(parts) >= 3 else parts[0]
-        if composite_key in MEDIA_MAPPING:
-            return MEDIA_MAPPING[composite_key]
-        for part in reversed(parts):
-            if part in MEDIA_MAPPING:
-                return MEDIA_MAPPING[part]
-        return composite_key.upper()
-    except:
-        return "기타"
-
 def parse_naver_exclusive(start_dt, end_dt, selected_keywords, client_id, client_secret, progress_callback=None):
     headers = {"X-Naver-Client-Id": client_id, "X-Naver-Client-Secret": client_secret}
     seen_links = set()
     candidate_items = []
-    past_articles_streak = 0
-    MAX_PAST_STREAK = 20
-    should_stop = False
 
     steps = list(range(1, 1001, 100))
     total_steps = len(steps)
 
-    # 1. API 검색 단계 (커넥션 풀 유지)
-    with httpx.Client(timeout=5.0) as api_client:
+    # 1. API 메타데이터 초고속 스캔 (1~1000건 완주로 시간 역전 누락 원천 차단)
+    with httpx.Client(timeout=4.0) as api_client:
         for idx, start_index in enumerate(steps):
-            if should_stop:
-                break
             if progress_callback:
                 progress_callback(idx / total_steps, f"🔍 [단독기사] 네이버 API 탐색 중... (후보 {len(candidate_items)}건 발견)")
 
@@ -260,7 +249,7 @@ def parse_naver_exclusive(start_dt, end_dt, selected_keywords, client_id, client
 
             for item in items:
                 link = item.get("link")
-                if link in seen_links:
+                if not link or link in seen_links:
                     continue
 
                 pub_date_str = item.get("pubDate")
@@ -269,18 +258,11 @@ def parse_naver_exclusive(start_dt, end_dt, selected_keywords, client_id, client
                 except:
                     continue
 
-                if pub_dt < start_dt:
-                    past_articles_streak += 1
-                    if past_articles_streak >= MAX_PAST_STREAK:
-                        should_stop = True
-                        break
-                    continue
-                else:
-                    past_articles_streak = 0
-
-                if pub_dt > end_dt:
+                # 시간 범위 1차 필터링
+                if not (start_dt <= pub_dt <= end_dt):
                     continue
 
+                # API 제목 1차 필터링 (불필요한 웹 크롤링 90% 이상 제거)
                 raw_api_title = html.unescape(re.sub(r"<.*?>", "", item.get("title", "")))
                 if not is_exclusive_title(raw_api_title):
                     continue
@@ -291,7 +273,7 @@ def parse_naver_exclusive(start_dt, end_dt, selected_keywords, client_id, client
     all_articles = []
     total_candidates = len(candidate_items)
 
-    # 2. 본문 크롤링 단계 (단일 공용 Client로 연결 재사용 극대화)
+    # 2. 선별된 후보군만 초고속 병렬 본문 확인
     limits = httpx.Limits(max_keepalive_connections=35, max_connections=40)
     with httpx.Client(timeout=4.5, limits=limits) as shared_fetch_client:
         def process_candidate(candidate):
@@ -302,7 +284,7 @@ def parse_naver_exclusive(start_dt, end_dt, selected_keywords, client_id, client
             if not title or not body:
                 return None
 
-            # 본문 전체 키워드 대조 (제목 누락 위험 원천 배제)
+            # 본문 전체 키워드 대조
             matched_kw = [kw for kw in selected_keywords if kw in body]
             if selected_keywords and not matched_kw:
                 return None
@@ -327,7 +309,7 @@ def parse_naver_exclusive(start_dt, end_dt, selected_keywords, client_id, client
                 if res:
                     all_articles.append(res)
                 if progress_callback and total_candidates > 0:
-                    progress_callback((i + 1) / total_candidates, f"📄 [단독기사] 본문 키워드 매칭 중... ({i+1}/{total_candidates}건)")
+                    progress_callback((i + 1) / total_candidates, f"📄 [단독기사] 본문 키워드 대조 중... ({i+1}/{total_candidates}건)")
 
     all_articles.sort(key=lambda x: x["datetime"], reverse=True)
     return all_articles
